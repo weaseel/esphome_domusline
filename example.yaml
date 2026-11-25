@@ -20,6 +20,7 @@ light:
     name: "Domus Line"
     cs_pin: 5
     ready_pin: 19
+    gdo0_pin: 4
 
 api:
   actions:

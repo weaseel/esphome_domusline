@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include "domusline.h"
 #include <SPI.h>
 
@@ -5,6 +6,8 @@
 constexpr uint32_t SPI_CLK = 250000;
 constexpr uint8_t CC2500_MAX_RX_PACKET_LENGTH = 61;
 constexpr uint8_t DOMUSLINE_RF_PAYLOAD_LENGTH = 14;
+constexpr uint8_t CC2500_GDO0_SYNC_WORD = 0x06;
+constexpr uint8_t CC2500_GDO0_PACKET_CRC_OK = 0x07;
 
 namespace esphome {
 namespace domusline {
@@ -25,6 +28,18 @@ DomusLine::DomusLine() : PollingComponent(200) {}
 
     void DomusLine::set_cs_pin(uint8_t pin) { CS = pin; }
     void DomusLine::set_ready_pin(uint8_t pin) { readyPin = pin; }
+    void DomusLine::set_gdo0_pin(uint8_t pin) { gdo0_pin_ = pin; }
+
+    void IRAM_ATTR DomusLine::gdo0_interrupt(void *arg)
+    {
+        auto *component = static_cast<DomusLine *>(arg);
+        component->receive_interrupt_pending_ = true;
+    }
+
+    uint8_t DomusLine::gdo0_signal_config() const
+    {
+        return gdo0_pin_ >= 0 ? CC2500_GDO0_PACKET_CRC_OK : CC2500_GDO0_SYNC_WORD;
+    }
 
     void DomusLine::send_test_command(int opcode, int argument, int repetitions)
     {
@@ -55,6 +70,12 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         
         ESP_LOGD("domusline", "Initializing CC2500");
         initialize_cc2500();
+        if (gdo0_pin_ >= 0)
+        {
+            pinMode(gdo0_pin_, INPUT);
+            attachInterruptArg(gdo0_pin_, &DomusLine::gdo0_interrupt, this, RISING);
+            receive_interrupt_pending_ = digitalRead(gdo0_pin_) == HIGH;
+        }
     }
 
     void DomusLine::update()
@@ -81,7 +102,13 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     void DomusLine::loop()
     {
         const uint32_t now = millis();
-        if (now - last_receive_poll_ms < 5)
+        noInterrupts();
+        const bool interrupt_pending = receive_interrupt_pending_;
+        receive_interrupt_pending_ = false;
+        interrupts();
+
+        const uint32_t poll_interval_ms = gdo0_pin_ >= 0 ? 1000 : 5;
+        if (!interrupt_pending && now - last_receive_poll_ms < poll_interval_ms)
             return;
 
         last_receive_poll_ms = now;
@@ -397,7 +424,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         send_cc2500_strobe(Cc2500Strobe::SRES);
         delayMicroseconds(300);
 
-        write_cc2500_register(Cc2500Register::IOCFG0, 0x06);
+        write_cc2500_register(Cc2500Register::IOCFG0, gdo0_signal_config());
         write_cc2500_register(Cc2500Register::FIFOTHR, 0x07);
         write_cc2500_register(Cc2500Register::SYNC1, 0xD3);
         write_cc2500_register(Cc2500Register::SYNC0, 0x91);
@@ -437,7 +464,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         write_cc2500_register(Cc2500Register::TEST1, 0x31);
         write_cc2500_register(Cc2500Register::TEST0, 0x0B);
         write_cc2500_register(Cc2500Register::IOCFG2, 0x29);
-        write_cc2500_register(Cc2500Register::IOCFG0, 0x06);
+        write_cc2500_register(Cc2500Register::IOCFG0, gdo0_signal_config());
         write_cc2500_register(Cc2500Register::PKTCTRL1, 0x04);
         write_cc2500_register(Cc2500Register::PKTCTRL0, 0x05);
         write_cc2500_register(Cc2500Register::ADDR, 0x01);

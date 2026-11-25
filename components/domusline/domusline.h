@@ -15,6 +15,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
 
   void set_cs_pin(uint8_t pin);
   void set_ready_pin(uint8_t pin);
+  void set_gdo0_pin(uint8_t pin);
   void send_test_command(int opcode, int argument, int repetitions);
 
   void setup() override;
@@ -25,6 +26,9 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void write_state(light::LightState *state) override;
 
  private:
+  static void gdo0_interrupt(void *arg);
+  uint8_t gdo0_signal_config() const;
+
   enum class Cc2500Strobe : uint8_t {
     SRES = 0x30,
     SCAL = 0x33,
@@ -127,6 +131,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
 
   uint8_t CS = 5;
   uint8_t readyPin = 19;
+  int gdo0_pin_ = -1;
   uint8_t actualBrightness = 10;
   uint8_t setBrightness = 10;
   uint8_t lastTemperature = 0;
@@ -134,6 +139,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   bool writeCallbackIsRunning = false;
   uint32_t last_receive_poll_ms = 0;
   uint8_t pending_rx_packet_length = 0;
+  volatile bool receive_interrupt_pending_ = false;
   light::LightState *light_state_{nullptr};
 };
 
