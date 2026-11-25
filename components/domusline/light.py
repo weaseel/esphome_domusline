@@ -9,8 +9,8 @@ AUTO_LOAD = []
 CONF_CS_PIN = "cs_pin"
 CONF_READY_PIN = "ready_pin"
 
-domus_line_ns = cg.esphome_ns.namespace("domus_line")
-DomusLine = domus_line_ns.class_("DomusLine", cg.PollingComponent, light.LightOutput)
+domusline_ns = cg.esphome_ns.namespace("domusline")
+DomusLine = domusline_ns.class_("DomusLine", cg.PollingComponent, light.LightOutput)
 
 CONFIG_SCHEMA = light.BRIGHTNESS_ONLY_LIGHT_SCHEMA.extend(
     {

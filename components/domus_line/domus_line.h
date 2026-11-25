@@ -5,7 +5,7 @@
 #define SPI_CLK 250000
 
 namespace esphome {
-namespace domus_line {
+namespace domusline {
 
 class DomusLine : public PollingComponent, public light::LightOutput
 {
@@ -36,7 +36,7 @@ class DomusLine : public PollingComponent, public light::LightOutput
         delay(500);
         digitalWrite(CS, HIGH);
         
-        ESP_LOGD("domus_line", "Initializing CC2500");
+        ESP_LOGD("domusline", "Initializing CC2500");
         init_cc2500();
     }
 
@@ -50,13 +50,13 @@ class DomusLine : public PollingComponent, public light::LightOutput
             {
                 cc2500_decreaseBrightness();
                 actualBrightness--;
-                ESP_LOGD("domus_line", "Decrease brightness to %d", actualBrightness);
+                ESP_LOGD("domusline", "Decrease brightness to %d", actualBrightness);
             }
             else if(actualBrightness < setBrightness)
             {
                 cc2500_increaseBrightness();
                 actualBrightness++;
-                ESP_LOGD("domus_line", "Increase brightness to %d", actualBrightness);
+                ESP_LOGD("domusline", "Increase brightness to %d", actualBrightness);
             }
         }
     }
@@ -99,19 +99,19 @@ class DomusLine : public PollingComponent, public light::LightOutput
 
         bool currentStatus;
         state->current_values_as_binary(&currentStatus);
-        ESP_LOGD("domus_line", "Light: %d", currentStatus);
+        ESP_LOGD("domusline", "Light: %d", currentStatus);
         if(lightIsOn != currentStatus)
         {
             if(currentStatus)
             {
                 cc2500_on(currentTemperature);
                 lastTemperature = currentTemperature;   // We set the temperature here already
-                ESP_LOGD("domus_line", "Light on");
+                ESP_LOGD("domusline", "Light on");
             }
             else
             {
                 cc2500_off();
-                ESP_LOGD("domus_line", "Light off");
+                ESP_LOGD("domusline", "Light off");
             }
             lightIsOn = currentStatus;
         }
@@ -122,18 +122,18 @@ class DomusLine : public PollingComponent, public light::LightOutput
             {
                 lastTemperature = currentTemperature;
                 
-                ESP_LOGD("domus_line", "Set temperature to %d", currentTemperature);
+                ESP_LOGD("domusline", "Set temperature to %d", currentTemperature);
                 cc2500_temperature(currentTemperature);
             }
             else
             {
-                ESP_LOGD("domus_line", "Dont change temperature - old: %d new: %d", lastTemperature, currentTemperature);
+                ESP_LOGD("domusline", "Dont change temperature - old: %d new: %d", lastTemperature, currentTemperature);
             }
         }
 
 
         setBrightness = currentBrightness;
-        ESP_LOGD("domus_line", "setBrightness: %d", setBrightness);
+        ESP_LOGD("domusline", "setBrightness: %d", setBrightness);
         
         writeCallbackIsRunning = false;
     }
@@ -172,7 +172,7 @@ class DomusLine : public PollingComponent, public light::LightOutput
             
             data_package[14] = crc;
 
-            ESP_LOGD("domus_line", "Package: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_package[0], data_package[1], data_package[2], data_package[3], data_package[4], data_package[5], data_package[6], data_package[7], data_package[8], data_package[9], data_package[10], data_package[11], data_package[12], data_package[13], data_package[14], data_package[15], data_package[16]);
+            ESP_LOGD("domusline", "Package: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_package[0], data_package[1], data_package[2], data_package[3], data_package[4], data_package[5], data_package[6], data_package[7], data_package[8], data_package[9], data_package[10], data_package[11], data_package[12], data_package[13], data_package[14], data_package[15], data_package[16]);
 
 
             send_spi_package(data_package, 17);

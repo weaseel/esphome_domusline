@@ -12,10 +12,10 @@ external_components:
       type: git
       url: https://github.com/weaseel/esphome_domusline
       ref: main
-    components: [domus_line]
+    components: [domusline]
 
 light:
-  - platform: domus_line
+  - platform: domusline
     name: "Domus Line"
     cs_pin: 5
     ready_pin: 19
@@ -34,7 +34,7 @@ external_components:
   - source:
       type: local
       path: ./esphome_domusline/components
-    components: [domus_line]
+    components: [domusline]
 ```
 
 Then use the same `light:` configuration shown above.

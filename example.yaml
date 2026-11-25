@@ -10,12 +10,12 @@ external_components:
   - source:
       type: local
       path: ./
-    components: [domus_line]
+    components: [domusline]
 
 logger:
 
 light:
-  - platform: domus_line
+  - platform: domusline
     name: "Domus Line"
     cs_pin: 5
     ready_pin: 19
