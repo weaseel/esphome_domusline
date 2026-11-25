@@ -9,6 +9,18 @@ constexpr uint8_t DOMUSLINE_RF_PAYLOAD_LENGTH = 14;
 namespace esphome {
 namespace domusline {
 
+namespace {
+// Theese numbers need a review!!!
+constexpr uint8_t DOMUSLINE_NO_ARGUMENT = 0;
+constexpr uint8_t DOMUSLINE_ON_OFF_REPEAT_COUNT = 6;
+constexpr uint16_t DOMUSLINE_ON_OFF_REPEAT_DELAY_MS = 35;
+constexpr uint8_t DOMUSLINE_BRIGHTNESS_UP_REPEAT_COUNT = 6;
+constexpr uint8_t DOMUSLINE_BRIGHTNESS_DOWN_REPEAT_COUNT = 5;
+constexpr uint16_t DOMUSLINE_BRIGHTNESS_REPEAT_DELAY_MS = 2;
+constexpr uint8_t DOMUSLINE_COLOR_TEMPERATURE_REPEAT_COUNT = 5;
+constexpr uint16_t DOMUSLINE_COLOR_TEMPERATURE_REPEAT_DELAY_MS = 2;
+}
+
 DomusLine::DomusLine() : PollingComponent(200) {}
 
     void DomusLine::set_cs_pin(uint8_t pin) { CS = pin; }
@@ -492,27 +504,35 @@ DomusLine::DomusLine() : PollingComponent(200) {}
 
     void DomusLine::turn_light_on(uint8_t currentTemperature)
     {
-        send_domusline_command_repeatedly(DomusLineCommand::LIGHT_ON, currentTemperature, 6, 35);
+        send_domusline_command_repeatedly(DomusLineCommand::LIGHT_ON, currentTemperature,
+                                          DOMUSLINE_ON_OFF_REPEAT_COUNT, DOMUSLINE_ON_OFF_REPEAT_DELAY_MS);
     }
 
     void DomusLine::turn_light_off()
     {
-        send_domusline_command_repeatedly(DomusLineCommand::LIGHT_OFF, 0, 6, 35);
+        send_domusline_command_repeatedly(DomusLineCommand::LIGHT_OFF, DOMUSLINE_NO_ARGUMENT,
+                                          DOMUSLINE_ON_OFF_REPEAT_COUNT, DOMUSLINE_ON_OFF_REPEAT_DELAY_MS);
     }
 
     void DomusLine::increase_light_brightness()
     {
-        send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_UP, 0, 6, 2);
+        send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_UP, DOMUSLINE_NO_ARGUMENT,
+                                          DOMUSLINE_BRIGHTNESS_UP_REPEAT_COUNT,
+                                          DOMUSLINE_BRIGHTNESS_REPEAT_DELAY_MS);
     }
 
     void DomusLine::decrease_light_brightness()
     {
-        send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_DOWN, 0, 5, 2);
+        send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_DOWN, DOMUSLINE_NO_ARGUMENT,
+                                          DOMUSLINE_BRIGHTNESS_DOWN_REPEAT_COUNT,
+                                          DOMUSLINE_BRIGHTNESS_REPEAT_DELAY_MS);
     }
 
     void DomusLine::set_light_color_temperature(uint8_t currentTemperature)
     {
-        send_domusline_command_repeatedly(DomusLineCommand::SET_COLOR_TEMPERATURE, currentTemperature, 5, 2);
+        send_domusline_command_repeatedly(DomusLineCommand::SET_COLOR_TEMPERATURE, currentTemperature,
+                                          DOMUSLINE_COLOR_TEMPERATURE_REPEAT_COUNT,
+                                          DOMUSLINE_COLOR_TEMPERATURE_REPEAT_DELAY_MS);
     }
 
     void DomusLine::enter_cc2500_receive_mode()
