@@ -1,0 +1,21 @@
+esphome:
+  name: domus-line-example
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+external_components:
+  - source:
+      type: local
+      path: ./
+    components: [domus_line]
+
+logger:
+
+light:
+  - platform: domus_line
+    name: "Domus Line"
+    cs_pin: 5
+    ready_pin: 19
