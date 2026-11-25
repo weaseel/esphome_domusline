@@ -2,7 +2,7 @@
 #include <SPI.h>
 
 
-#define SPI_CLK 250000
+constexpr uint32_t SPI_CLK = 250000;
 
 namespace esphome {
 namespace domusline {
@@ -26,7 +26,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         digitalWrite(CS, HIGH);
         
         ESP_LOGD("domusline", "Initializing CC2500");
-        init_cc2500();
+        initialize_cc2500();
     }
 
     void DomusLine::update()
@@ -37,13 +37,13 @@ DomusLine::DomusLine() : PollingComponent(200) {}
             // Only called if the light is on!
             if(actualBrightness > setBrightness)
             {
-                cc2500_decreaseBrightness();
+                decrease_light_brightness();
                 actualBrightness--;
                 ESP_LOGD("domusline", "Decrease brightness to %d", actualBrightness);
             }
             else if(actualBrightness < setBrightness)
             {
-                cc2500_increaseBrightness();
+                increase_light_brightness();
                 actualBrightness++;
                 ESP_LOGD("domusline", "Increase brightness to %d", actualBrightness);
             }
@@ -93,13 +93,13 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         {
             if(currentStatus)
             {
-                cc2500_on(currentTemperature);
+                turn_light_on(currentTemperature);
                 lastTemperature = currentTemperature;   // We set the temperature here already
                 ESP_LOGD("domusline", "Light on");
             }
             else
             {
-                cc2500_off();
+                turn_light_off();
                 ESP_LOGD("domusline", "Light off");
             }
             lightIsOn = currentStatus;
@@ -112,7 +112,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
                 lastTemperature = currentTemperature;
                 
                 ESP_LOGD("domusline", "Set temperature to %d", currentTemperature);
-                cc2500_temperature(currentTemperature);
+                set_light_color_temperature(currentTemperature);
             }
             else
             {
@@ -127,7 +127,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         writeCallbackIsRunning = false;
     }
 
-    void DomusLine::send_spi_package(uint8_t* data, uint8_t length)
+    void DomusLine::transfer_cc2500_bytes(const uint8_t *data, uint8_t length)
     {
         digitalWrite(CS, LOW);
         delayMicroseconds(5);
@@ -146,315 +146,198 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         delayMicroseconds(40);
     }
     
-    void DomusLine::send_spi_package_CRC(uint8_t* data, uint8_t length)
+    void DomusLine::send_cc2500_strobe(Cc2500Strobe strobe)
     {
-        if(length < 12)
-        {
-            uint8_t data_package[17] = {0x7F, 0x0E, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0xFF};
-
-            uint8_t crc = cc2500_crc(data, 11);
-
-            for (std::size_t i = 0; i < length; i++)
-            {
-                data_package[i + 3] = data[i];
-            }
-            
-            data_package[14] = crc;
-
-            ESP_LOGD("domusline", "Package: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_package[0], data_package[1], data_package[2], data_package[3], data_package[4], data_package[5], data_package[6], data_package[7], data_package[8], data_package[9], data_package[10], data_package[11], data_package[12], data_package[13], data_package[14], data_package[15], data_package[16]);
-
-
-            send_spi_package(data_package, 17);
-        }
+        const uint8_t value = static_cast<uint8_t>(strobe);
+        transfer_cc2500_bytes(&value, 1);
     }
-    
-    void DomusLine::wait_send_spi_package(uint8_t* data, uint8_t length)
+
+    void DomusLine::write_cc2500_register(Cc2500Register reg, uint8_t value)
+    {
+        const uint8_t transaction[] = {static_cast<uint8_t>(reg), value};
+        transfer_cc2500_bytes(transaction, sizeof(transaction));
+    }
+
+    uint8_t DomusLine::read_cc2500_register(Cc2500Register reg)
     {
         digitalWrite(CS, LOW);
         delayMicroseconds(5);
-        while(digitalRead(readyPin) == true)
+        while(digitalRead(readyPin) == HIGH)
         {
             delayMicroseconds(2);
         }
 
-        for(int i=0; i<length; i++)
-        {
-            SPI.transfer(data[i]);
-        }
+        SPI.transfer(static_cast<uint8_t>(reg) | 0x80);
+        const uint8_t value = SPI.transfer(0xFF);
         delayMicroseconds(5);
-        
         digitalWrite(CS, HIGH);
         delayMicroseconds(40);
+        return value;
     }
 
-    void DomusLine::init_cc2500()
+    void DomusLine::write_cc2500_burst(Cc2500Register address, const uint8_t *data, uint8_t length)
     {
-        uint8_t data_00[] = {0x36};
-        send_spi_package(data_00, 1);
+        if (length > 16)
+        {
+            ESP_LOGE("domusline", "CC2500 burst write too long: %u", length);
+            return;
+        }
+
+        uint8_t transaction[17];
+        transaction[0] = static_cast<uint8_t>(address) | 0x40;
+        for (uint8_t i = 0; i < length; i++)
+            transaction[i + 1] = data[i];
+        transfer_cc2500_bytes(transaction, length + 1);
+    }
+
+    void DomusLine::initialize_cc2500()
+    {
+        send_cc2500_strobe(Cc2500Strobe::SIDLE);
         digitalWrite(CS, LOW);
         delayMicroseconds(10);
         digitalWrite(CS, HIGH);
         delayMicroseconds(300);
 
-        uint8_t data_00a[] = {0x30};
-        send_spi_package(data_00a, 1);
+        send_cc2500_strobe(Cc2500Strobe::SRES);
         delayMicroseconds(300);
-        uint8_t data_01[] = {0x02, 0x06};
-        send_spi_package(data_01, 2);
-        uint8_t data_02[] = {0x03, 0x07};
-        send_spi_package(data_02, 2);
-        uint8_t data_03[] = {0x04, 0xD3};
-        send_spi_package(data_03, 2);
-        uint8_t data_04[] = {0x05, 0x91};
-        send_spi_package(data_04, 2);
-        uint8_t data_05[] = {0x0B, 0x09};
-        send_spi_package(data_05, 2);
-        uint8_t data_06[] = {0x0C, 0x00};
-        send_spi_package(data_06, 2);
-        uint8_t data_07[] = {0x0D, 0x5D};
-        send_spi_package(data_07, 2);
-        uint8_t data_08[] = {0x0E, 0x93};
-        send_spi_package(data_08, 2);
-        uint8_t data_09[] = {0x0F, 0xB1};
-        send_spi_package(data_09, 2);
-        uint8_t data_10[] = {0x10, 0x2D};
-        send_spi_package(data_10, 2);
-        uint8_t data_11[] = {0x11, 0x3B};
-        send_spi_package(data_11, 2);
-        uint8_t data_12[] = {0x12, 0x73};
-        send_spi_package(data_12, 2);
-        uint8_t data_13[] = {0x13, 0xA2};
-        send_spi_package(data_13, 2);
-        uint8_t data_14[] = {0x14, 0xF8};
-        send_spi_package(data_14, 2);
-        uint8_t data_15[] = {0x0A, 0x10};
-        send_spi_package(data_15, 2);
-        uint8_t data_16[] = {0x15, 0x01};
-        send_spi_package(data_16, 2);
-        uint8_t data_17[] = {0x21, 0xB6};
-        send_spi_package(data_17, 2);
-        uint8_t data_18[] = {0x22, 0x10};
-        send_spi_package(data_18, 2);
-        uint8_t data_19[] = {0x16, 0x07};
-        send_spi_package(data_19, 2);
-        uint8_t data_20[] = {0x17, 0x30};
-        send_spi_package(data_20, 2);
-        uint8_t data_21[] = {0x18, 0x18};
-        send_spi_package(data_21, 2);
-        uint8_t data_22[] = {0x19, 0x1D};
-        send_spi_package(data_22, 2);
-        uint8_t data_23[] = {0x1A, 0x1C};
-        send_spi_package(data_23, 2);
-        uint8_t data_24[] = {0x1B, 0xC7};
-        send_spi_package(data_24, 2);
-        uint8_t data_25[] = {0x1C, 0x00};
-        send_spi_package(data_25, 2);
-        uint8_t data_26[] = {0x1D, 0xB2};
-        send_spi_package(data_26, 2);
-        uint8_t data_27[] = {0x23, 0xEA};
-        send_spi_package(data_27, 2);
-        uint8_t data_28[] = {0x24, 0x0A};
-        send_spi_package(data_28, 2);
-        uint8_t data_29[] = {0x25, 0x00};
-        send_spi_package(data_29, 2);
-        uint8_t data_30[] = {0x26, 0x11};
-        send_spi_package(data_30, 2);
-        uint8_t data_31[] = {0x27, 0x41};
-        send_spi_package(data_31, 2);
-        uint8_t data_32[] = {0x28, 0x00};
-        send_spi_package(data_32, 2);
-        uint8_t data_33[] = {0x1E, 0x87};
-        send_spi_package(data_33, 2);
-        uint8_t data_34[] = {0x1F, 0x6B};
-        send_spi_package(data_34, 2);
-        uint8_t data_35[] = {0x20, 0xF8};
-        send_spi_package(data_35, 2);
-        uint8_t data_36[] = {0x29, 0x59};
-        send_spi_package(data_36, 2);
-        uint8_t data_37[] = {0x2C, 0x88};
-        send_spi_package(data_37, 2);
-        uint8_t data_38[] = {0x2D, 0x31};
-        send_spi_package(data_38, 2);
-        uint8_t data_39[] = {0x2E, 0x0B};
-        send_spi_package(data_39, 2);
-        uint8_t data_40[] = {0x00, 0x29};
-        send_spi_package(data_40, 2);
-        uint8_t data_41[] = {0x02, 0x06};
-        send_spi_package(data_41, 2);
-        uint8_t data_42[] = {0x07, 0x04};
-        send_spi_package(data_42, 2);
-        uint8_t data_43[] = {0x08, 0x05};
-        send_spi_package(data_43, 2);
-        uint8_t data_44[] = {0x09, 0x01};
-        send_spi_package(data_44, 2);
-        uint8_t data_45[] = {0x06, 0xFF};
-        send_spi_package(data_45, 2);
-        uint8_t data_46[] = {0x93, 0xFF};
-        send_spi_package(data_46, 2);
-        uint8_t data_47[] = {0x7E, 0xFF, 0xFE, 0xBB, 0xA9, 0x7F, 0x6E, 0x97, 0xC5};
-        send_spi_package(data_47, 9);
-        uint8_t data_48[] = {0x33};
-        send_spi_package(data_48, 1);
+
+        write_cc2500_register(Cc2500Register::IOCFG0, 0x06);
+        write_cc2500_register(Cc2500Register::FIFOTHR, 0x07);
+        write_cc2500_register(Cc2500Register::SYNC1, 0xD3);
+        write_cc2500_register(Cc2500Register::SYNC0, 0x91);
+        write_cc2500_register(Cc2500Register::FSCTRL1, 0x09);
+        write_cc2500_register(Cc2500Register::FSCTRL0, 0x00);
+        write_cc2500_register(Cc2500Register::FREQ2, 0x5D);
+        write_cc2500_register(Cc2500Register::FREQ1, 0x93);
+        write_cc2500_register(Cc2500Register::FREQ0, 0xB1);
+        write_cc2500_register(Cc2500Register::MDMCFG4, 0x2D);
+        write_cc2500_register(Cc2500Register::MDMCFG3, 0x3B);
+        write_cc2500_register(Cc2500Register::MDMCFG2, 0x73);
+        write_cc2500_register(Cc2500Register::MDMCFG1, 0xA2);
+        write_cc2500_register(Cc2500Register::MDMCFG0, 0xF8);
+        write_cc2500_register(Cc2500Register::CHANNR, 0x10);
+        write_cc2500_register(Cc2500Register::DEVIATN, 0x01);
+        write_cc2500_register(Cc2500Register::FREND1, 0xB6);
+        write_cc2500_register(Cc2500Register::FREND0, 0x10);
+        write_cc2500_register(Cc2500Register::MCSM2, 0x07);
+        write_cc2500_register(Cc2500Register::MCSM1, 0x30);
+        write_cc2500_register(Cc2500Register::MCSM0, 0x18);
+        write_cc2500_register(Cc2500Register::FOCCFG, 0x1D);
+        write_cc2500_register(Cc2500Register::BSCFG, 0x1C);
+        write_cc2500_register(Cc2500Register::AGCCTRL2, 0xC7);
+        write_cc2500_register(Cc2500Register::AGCCTRL1, 0x00);
+        write_cc2500_register(Cc2500Register::AGCCTRL0, 0xB2);
+        write_cc2500_register(Cc2500Register::FSCAL3, 0xEA);
+        write_cc2500_register(Cc2500Register::FSCAL2, 0x0A);
+        write_cc2500_register(Cc2500Register::FSCAL1, 0x00);
+        write_cc2500_register(Cc2500Register::FSCAL0, 0x11);
+        write_cc2500_register(Cc2500Register::RCCTRL1, 0x41);
+        write_cc2500_register(Cc2500Register::RCCTRL0, 0x00);
+        write_cc2500_register(Cc2500Register::WOREVT1, 0x87);
+        write_cc2500_register(Cc2500Register::WOREVT0, 0x6B);
+        write_cc2500_register(Cc2500Register::WORCTRL, 0xF8);
+        write_cc2500_register(Cc2500Register::FSTEST, 0x59);
+        write_cc2500_register(Cc2500Register::TEST2, 0x88);
+        write_cc2500_register(Cc2500Register::TEST1, 0x31);
+        write_cc2500_register(Cc2500Register::TEST0, 0x0B);
+        write_cc2500_register(Cc2500Register::IOCFG2, 0x29);
+        write_cc2500_register(Cc2500Register::IOCFG0, 0x06);
+        write_cc2500_register(Cc2500Register::PKTCTRL1, 0x04);
+        write_cc2500_register(Cc2500Register::PKTCTRL0, 0x05);
+        write_cc2500_register(Cc2500Register::ADDR, 0x01);
+        write_cc2500_register(Cc2500Register::PKTLEN, 0xFF);
+
+        (void) read_cc2500_register(Cc2500Register::MDMCFG1);
+
+        const uint8_t pa_table[] = {0xFF, 0xFE, 0xBB, 0xA9, 0x7F, 0x6E, 0x97, 0xC5};
+        write_cc2500_burst(Cc2500Register::PATABLE, pa_table, sizeof(pa_table));
+
+        send_cc2500_strobe(Cc2500Strobe::SCAL);
         delay(3);
-        uint8_t data_49[] = {0x34};
-        send_spi_package(data_49, 1);
+        send_cc2500_strobe(Cc2500Strobe::SRX);
         delay(2);
-        uint8_t data_50[] = {0x36};
-        send_spi_package(data_50, 1);
-        uint8_t data_51[] = {0x3B};
-        send_spi_package(data_51, 1);
-        uint8_t data_52[] = {0x05, 0x7A, 0xEF, 0x50, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        send_spi_package_CRC(data_52, 11);
-        uint8_t data_53[] = {0x35};
-        send_spi_package(data_53, 1);
-        delay(3);
-        uint8_t data_54[] = {0x36};
-        send_spi_package(data_54, 1);
-        uint8_t data_55[] = {0x3B};
-        send_spi_package(data_55, 1);
-        uint8_t data_56[] = {0x05, 0x7A, 0xEF, 0x50, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        send_spi_package_CRC(data_56, 11);
-        uint8_t data_57[] = {0x35};
-        send_spi_package(data_57, 1);
-        delay(3);
-        uint8_t data_58[] = {0x36};
-        send_spi_package(data_58, 1);
-        uint8_t data_59[] = {0x3B};
-        send_spi_package(data_59, 1);
-        uint8_t data_60[] = {0x05, 0x7A, 0xEF, 0x50, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        send_spi_package_CRC(data_60, 11);
-        uint8_t data_61[] = {0x35};
-        send_spi_package(data_61, 1);
-        delay(3);
-        uint8_t data_62[] = {0x36};
-        send_spi_package(data_62, 1);
-        uint8_t data_63[] = {0x3B};
-        send_spi_package(data_63, 1);
-        uint8_t data_64[] = {0x05, 0x7A, 0xEF, 0x50, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        send_spi_package_CRC(data_64, 11);
-        uint8_t data_65[] = {0x35};
-        send_spi_package(data_65, 1);
-        delay(3);
-        uint8_t data_66[] = {0x36};
-        send_spi_package(data_66, 1);
-        uint8_t data_67[] = {0x3B};
-        send_spi_package(data_67, 1);
-        uint8_t data_68[] = {0x05, 0x7A, 0xEF, 0x50, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        send_spi_package_CRC(data_68, 11);
-        uint8_t data_69[] = {0x35};
-        send_spi_package(data_69, 1);
-    }
 
-    void DomusLine::cc2500_on(uint8_t currentTemperature)
-    {
-        for(int i=0; i<6; i++)
+        for (uint8_t attempt = 0; attempt < 5; attempt++)
         {
-            uint8_t data_00[] = {0x36};
-            wait_send_spi_package(data_00, 1);
-            uint8_t data_01[] = {0x3B};
-            send_spi_package(data_01, 1);
-            uint8_t data_02[] = {0x05, 0x7A, 0xEF, 0x01, currentTemperature, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-            send_spi_package_CRC(data_02, 11);
-            uint8_t data_03[] = {0x35};
-            send_spi_package(data_03, 1);
-            delay(35);
+            send_cc2500_strobe(Cc2500Strobe::SIDLE);
+            send_cc2500_strobe(Cc2500Strobe::SFTX);
+            send_domusline_command(DomusLineCommand::SET_COLOR_TEMPERATURE, 0x2C);
+            send_cc2500_strobe(Cc2500Strobe::STX);
+            delay(3);
         }
-        
-        cc2500_lowPower();
     }
 
-    void DomusLine::cc2500_off()
+    void DomusLine::send_domusline_command(DomusLineCommand command, uint8_t argument)
     {
-        for(int i=0; i<6; i++)
+        const uint8_t payload[] = {0x05, 0x7A, 0xEF, static_cast<uint8_t>(command), argument,
+                                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        uint8_t fifo_packet[] = {0x0E, 0x68, 0x05, 0x7A, 0xEF, static_cast<uint8_t>(command), argument,
+                                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0xFF};
+        fifo_packet[13] = calculate_domusline_xor_checksum(payload, sizeof(payload));
+
+        ESP_LOGD("domusline", "Queue Domus Line command 0x%02X, argument 0x%02X",
+                 static_cast<uint8_t>(command), argument);
+        write_cc2500_burst(Cc2500Register::TX_FIFO, fifo_packet, sizeof(fifo_packet));
+    }
+
+    void DomusLine::send_domusline_command_repeatedly(DomusLineCommand command, uint8_t argument,
+                                                      uint8_t repeat_count, uint16_t repeat_delay_ms)
+    {
+        for (uint8_t attempt = 0; attempt < repeat_count; attempt++)
         {
-            uint8_t data_00[] = {0x36};
-            wait_send_spi_package(data_00, 1);
-            uint8_t data_01[] = {0x3B};
-            send_spi_package(data_01, 1);
-            uint8_t data_02[] = {0x05, 0x7A, 0xEF, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-            send_spi_package_CRC(data_02, 11);
-            uint8_t data_03[] = {0x35};
-            send_spi_package(data_03, 1);
-            delay(35);
+            send_cc2500_strobe(Cc2500Strobe::SIDLE);
+            send_cc2500_strobe(Cc2500Strobe::SFTX);
+            send_domusline_command(command, argument);
+            send_cc2500_strobe(Cc2500Strobe::STX);
+            delay(repeat_delay_ms);
         }
-        
-        cc2500_lowPower();
     }
 
-    void DomusLine::cc2500_increaseBrightness()
+    void DomusLine::turn_light_on(uint8_t currentTemperature)
     {
-        for(int i=0; i<6; i++)
-        {
-            uint8_t data_00[] = {0x36};
-            send_spi_package(data_00, 1);
-            uint8_t data_01[] = {0x3B};
-            send_spi_package(data_01, 1);
-            uint8_t data_02[] = {0x05, 0x7A, 0xEF, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-            send_spi_package_CRC(data_02, 11);
-            uint8_t data_03[] = {0x35};
-            send_spi_package(data_03, 1);
-            delay(2);
-        }
-        uint8_t data_32[] = {0x39};
-        send_spi_package(data_32, 1);
+        send_domusline_command_repeatedly(DomusLineCommand::LIGHT_ON, currentTemperature, 6, 35);
+        enter_cc2500_power_down();
     }
 
-    void DomusLine::cc2500_decreaseBrightness()
+    void DomusLine::turn_light_off()
     {
-        for(int i=0; i<5; i++)
-        {
-            uint8_t data_00[] = {0x36};
-            wait_send_spi_package(data_00, 1);
-            uint8_t data_01[] = {0x3B};
-            send_spi_package(data_01, 1);
-            uint8_t data_02[] = {0x05, 0x7A, 0xEF, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-            send_spi_package_CRC(data_02, 11);
-            uint8_t data_03[] = {0x35};
-            send_spi_package(data_03, 1);
-            delay(2);
-        }
-        
-        cc2500_lowPower();
+        send_domusline_command_repeatedly(DomusLineCommand::LIGHT_OFF, 0, 6, 35);
+        enter_cc2500_power_down();
     }
 
-    void DomusLine::cc2500_temperature(uint8_t currentTemperature)
+    void DomusLine::increase_light_brightness()
     {
-        for(int i=0; i<5; i++)
-        {
-            uint8_t data_00[] = {0x36};
-            wait_send_spi_package(data_00, 1);
-            uint8_t data_01[] = {0x3B};
-            send_spi_package(data_01, 1);
-            uint8_t data_02[] = {0x05, 0x7A, 0xEF, 0x50, currentTemperature, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-            send_spi_package_CRC(data_02, 11);
-            uint8_t data_03[] = {0x35};
-            send_spi_package(data_03, 1);
-            delay(2);
-        }
-        
-        cc2500_lowPower();
+        send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_UP, 0, 6, 2);
+        send_cc2500_strobe(Cc2500Strobe::SPWD);
     }
 
-    void DomusLine::cc2500_lowPower()
+    void DomusLine::decrease_light_brightness()
     {
-        for(int i=0; i<5; i++)
+        send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_DOWN, 0, 5, 2);
+        enter_cc2500_power_down();
+    }
+
+    void DomusLine::set_light_color_temperature(uint8_t currentTemperature)
+    {
+        send_domusline_command_repeatedly(DomusLineCommand::SET_COLOR_TEMPERATURE, currentTemperature, 5, 2);
+        enter_cc2500_power_down();
+    }
+
+    void DomusLine::enter_cc2500_power_down()
+    {
+        for (uint8_t attempt = 0; attempt < 5; attempt++)
         {
-            uint8_t data_70[] = {0x39};
-            send_spi_package(data_70, 1);
+            send_cc2500_strobe(Cc2500Strobe::SPWD);
             delay(67);
         }
     }
 
-    uint8_t DomusLine::cc2500_crc(uint8_t* data, std::size_t len)
+    uint8_t DomusLine::calculate_domusline_xor_checksum(const uint8_t *data, std::size_t length)
     {
-        uint8_t crc = 0x00;
-
-        for (std::size_t i = 0; i < len; i++)
-        {
-            crc ^= data[i];
-        }
-
-        return crc;
+        uint8_t checksum = 0;
+        for (std::size_t i = 0; i < length; i++)
+            checksum ^= data[i];
+        return checksum;
     }
 
 

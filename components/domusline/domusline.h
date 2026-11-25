@@ -23,18 +23,91 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void write_state(light::LightState *state) override;
 
  private:
+  enum class Cc2500Strobe : uint8_t {
+    SRES = 0x30,
+    SCAL = 0x33,
+    SRX = 0x34,
+    STX = 0x35,
+    SIDLE = 0x36,
+    SPWD = 0x39,
+    SFTX = 0x3B,
+  };
+
+  enum class Cc2500Register : uint8_t {
+    IOCFG2 = 0x00,
+    IOCFG0 = 0x02,
+    FIFOTHR = 0x03,
+    SYNC1 = 0x04,
+    SYNC0 = 0x05,
+    PKTLEN = 0x06,
+    PKTCTRL1 = 0x07,
+    PKTCTRL0 = 0x08,
+    ADDR = 0x09,
+    CHANNR = 0x0A,
+    FSCTRL1 = 0x0B,
+    FSCTRL0 = 0x0C,
+    FREQ2 = 0x0D,
+    FREQ1 = 0x0E,
+    FREQ0 = 0x0F,
+    MDMCFG4 = 0x10,
+    MDMCFG3 = 0x11,
+    MDMCFG2 = 0x12,
+    MDMCFG1 = 0x13,
+    MDMCFG0 = 0x14,
+    DEVIATN = 0x15,
+    MCSM2 = 0x16,
+    MCSM1 = 0x17,
+    MCSM0 = 0x18,
+    FOCCFG = 0x19,
+    BSCFG = 0x1A,
+    AGCCTRL2 = 0x1B,
+    AGCCTRL1 = 0x1C,
+    AGCCTRL0 = 0x1D,
+    WOREVT1 = 0x1E,
+    WOREVT0 = 0x1F,
+    WORCTRL = 0x20,
+    FREND1 = 0x21,
+    FREND0 = 0x22,
+    FSCAL3 = 0x23,
+    FSCAL2 = 0x24,
+    FSCAL1 = 0x25,
+    FSCAL0 = 0x26,
+    RCCTRL1 = 0x27,
+    RCCTRL0 = 0x28,
+    FSTEST = 0x29,
+    TEST2 = 0x2C,
+    TEST1 = 0x2D,
+    TEST0 = 0x2E,
+    PATABLE = 0x3E,
+    TX_FIFO = 0x3F,
+  };
+
+  // These are Domus Line payload opcodes, not CC2500 command strobes.
+  enum class DomusLineCommand : uint8_t {
+    LIGHT_ON = 0x01,
+    LIGHT_OFF = 0x02,
+    BRIGHTNESS_UP = 0x11,
+    BRIGHTNESS_DOWN = 0x21,
+    SET_COLOR_TEMPERATURE = 0x50,
+  };
+
   void get_current_values(light::LightState *state, uint8_t &current_temperature, uint8_t &current_brightness);
-  void send_spi_package(uint8_t *data, uint8_t length);
-  void send_spi_package_CRC(uint8_t *data, uint8_t length);
-  void wait_send_spi_package(uint8_t *data, uint8_t length);
-  void init_cc2500();
-  void cc2500_on(uint8_t current_temperature);
-  void cc2500_off();
-  void cc2500_increaseBrightness();
-  void cc2500_decreaseBrightness();
-  void cc2500_temperature(uint8_t current_temperature);
-  void cc2500_lowPower();
-  uint8_t cc2500_crc(uint8_t *data, std::size_t length);
+  void transfer_cc2500_bytes(const uint8_t *data, uint8_t length);
+  void send_cc2500_strobe(Cc2500Strobe strobe);
+  void write_cc2500_register(Cc2500Register reg, uint8_t value);
+  uint8_t read_cc2500_register(Cc2500Register reg);
+  void write_cc2500_burst(Cc2500Register address, const uint8_t *data, uint8_t length);
+  void initialize_cc2500();
+  void send_domusline_command(DomusLineCommand command, uint8_t argument);
+  void send_domusline_command_repeatedly(DomusLineCommand command, uint8_t argument, uint8_t repeat_count,
+                                         uint16_t repeat_delay_ms);
+  void turn_light_on(uint8_t current_temperature);
+  void turn_light_off();
+  void increase_light_brightness();
+  void decrease_light_brightness();
+  void set_light_color_temperature(uint8_t current_temperature);
+  void enter_cc2500_power_down();
+  uint8_t calculate_domusline_xor_checksum(const uint8_t *data, std::size_t length);
 
   uint8_t CS = 5;
   uint8_t readyPin = 19;
