@@ -3,6 +3,8 @@
 
 
 constexpr uint32_t SPI_CLK = 250000;
+constexpr uint8_t CC2500_MAX_RX_PACKET_LENGTH = 61;
+constexpr uint8_t DOMUSLINE_RF_PAYLOAD_LENGTH = 14;
 
 namespace esphome {
 namespace domusline {
@@ -49,6 +51,16 @@ DomusLine::DomusLine() : PollingComponent(200) {}
             }
         }
     }
+
+    void DomusLine::loop()
+    {
+        const uint32_t now = millis();
+        if (now - last_receive_poll_ms < 5)
+            return;
+
+        last_receive_poll_ms = now;
+        poll_cc2500_rx_fifo();
+    }
   
     light::LightTraits DomusLine::get_traits()
     {
@@ -62,8 +74,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
 
     void DomusLine::setup_state(light::LightState *state) 
     {
-        // empty for now
-        
+        light_state_ = state;
     }
 
     void DomusLine::get_current_values(light::LightState *state, uint8_t &currentTemperature, uint8_t &currentBrightness)
@@ -175,6 +186,37 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         return value;
     }
 
+    uint8_t DomusLine::read_cc2500_status_register(Cc2500StatusRegister reg)
+    {
+        digitalWrite(CS, LOW);
+        delayMicroseconds(5);
+        while (digitalRead(readyPin) == HIGH)
+            delayMicroseconds(2);
+
+        SPI.transfer(static_cast<uint8_t>(reg) | 0xC0);
+        const uint8_t value = SPI.transfer(0xFF);
+        delayMicroseconds(5);
+        digitalWrite(CS, HIGH);
+        delayMicroseconds(40);
+        return value;
+    }
+
+    void DomusLine::read_cc2500_rx_fifo(uint8_t *data, uint8_t length)
+    {
+        digitalWrite(CS, LOW);
+        delayMicroseconds(5);
+        while (digitalRead(readyPin) == HIGH)
+            delayMicroseconds(2);
+
+        SPI.transfer(static_cast<uint8_t>(Cc2500Register::TX_FIFO) | 0xC0);
+        for (uint8_t i = 0; i < length; i++)
+            data[i] = SPI.transfer(0xFF);
+
+        delayMicroseconds(5);
+        digitalWrite(CS, HIGH);
+        delayMicroseconds(40);
+    }
+
     void DomusLine::write_cc2500_burst(Cc2500Register address, const uint8_t *data, uint8_t length)
     {
         if (length > 16)
@@ -188,6 +230,134 @@ DomusLine::DomusLine() : PollingComponent(200) {}
         for (uint8_t i = 0; i < length; i++)
             transaction[i + 1] = data[i];
         transfer_cc2500_bytes(transaction, length + 1);
+    }
+
+    void DomusLine::poll_cc2500_rx_fifo()
+    {
+        const uint8_t rx_bytes = read_cc2500_status_register(Cc2500StatusRegister::RXBYTES);
+        if (rx_bytes & 0x80)
+        {
+            ESP_LOGW("domusline", "CC2500 RX FIFO overflow; flushing receive data");
+            flush_cc2500_rx_fifo();
+            return;
+        }
+
+        uint8_t available = rx_bytes & 0x7F;
+        if (pending_rx_packet_length == 0)
+        {
+            if (available == 0)
+                return;
+
+            read_cc2500_rx_fifo(&pending_rx_packet_length, 1);
+            available--;
+            if (pending_rx_packet_length == 0 || pending_rx_packet_length > CC2500_MAX_RX_PACKET_LENGTH)
+            {
+                ESP_LOGW("domusline", "Invalid CC2500 RX packet length: %u", pending_rx_packet_length);
+                flush_cc2500_rx_fifo();
+                return;
+            }
+        }
+
+        const uint8_t bytes_needed = pending_rx_packet_length + 2;
+        if (available < bytes_needed)
+            return;
+
+        uint8_t packet_and_status[CC2500_MAX_RX_PACKET_LENGTH + 2];
+        const uint8_t packet_length = pending_rx_packet_length;
+        read_cc2500_rx_fifo(packet_and_status, bytes_needed);
+        pending_rx_packet_length = 0;
+
+        const bool crc_valid = (packet_and_status[packet_length + 1] & 0x80) != 0;
+        process_received_packet(packet_and_status, packet_length, crc_valid);
+    }
+
+    void DomusLine::process_received_packet(const uint8_t *packet, uint8_t length, bool crc_valid)
+    {
+        if (!crc_valid)
+        {
+            ESP_LOGW("domusline", "Received CC2500 packet with invalid radio CRC");
+            return;
+        }
+
+        if (length != DOMUSLINE_RF_PAYLOAD_LENGTH || packet[0] != 0x68 || packet[1] != 0x05 ||
+            packet[2] != 0x7A || packet[3] != 0xEF || packet[13] != 0x16)
+            return;
+
+        const uint8_t checksum = calculate_domusline_xor_checksum(packet + 1, 11);
+        if (packet[12] != checksum)
+        {
+            ESP_LOGW("domusline", "Received Domus Line frame with invalid XOR checksum");
+            return;
+        }
+
+        const uint8_t opcode = packet[4];
+        const uint8_t argument = packet[5];
+        const char *command_name = "unknown";
+        switch (static_cast<DomusLineCommand>(opcode))
+        {
+            case DomusLineCommand::LIGHT_ON:
+                command_name = "light on";
+                break;
+            case DomusLineCommand::LIGHT_OFF:
+                command_name = "light off";
+                break;
+            case DomusLineCommand::BRIGHTNESS_UP:
+                command_name = "brightness up";
+                break;
+            case DomusLineCommand::BRIGHTNESS_DOWN:
+                command_name = "brightness down";
+                break;
+            case DomusLineCommand::SET_COLOR_TEMPERATURE:
+                command_name = "set color temperature";
+                break;
+        }
+
+        ESP_LOGI("domusline", "Received Domus Line RF command: %s (opcode 0x%02X, argument 0x%02X)",
+                 command_name, opcode, argument);
+        synchronize_remote_command(static_cast<DomusLineCommand>(opcode), argument);
+    }
+
+    void DomusLine::synchronize_remote_command(DomusLineCommand command, uint8_t argument)
+    {
+        if (light_state_ == nullptr)
+            return;
+
+        auto values = light_state_->remote_values;
+        switch (command)
+        {
+            case DomusLineCommand::LIGHT_ON:
+                values.set_color_mode(light::ColorMode::COLD_WARM_WHITE);
+                values.set_cold_white(argument / 255.0f);
+                values.set_warm_white((255 - argument) / 255.0f);
+                values.set_state(true);
+                lightIsOn = true;
+                lastTemperature = argument;
+                break;
+            case DomusLineCommand::LIGHT_OFF:
+                values.set_state(false);
+                lightIsOn = false;
+                break;
+            case DomusLineCommand::SET_COLOR_TEMPERATURE:
+                values.set_color_mode(light::ColorMode::COLD_WARM_WHITE);
+                values.set_cold_white(argument / 255.0f);
+                values.set_warm_white((255 - argument) / 255.0f);
+                lastTemperature = argument;
+                break;
+            case DomusLineCommand::BRIGHTNESS_UP: // Nothing yet here
+            case DomusLineCommand::BRIGHTNESS_DOWN: // Nothing yet here
+                return;
+        }
+
+        if (!light_state_->set_external_state(values))
+            ESP_LOGW("domusline", "Could not synchronize remote command while the light is transitioning");
+    }
+
+    void DomusLine::flush_cc2500_rx_fifo()
+    {
+        pending_rx_packet_length = 0;
+        send_cc2500_strobe(Cc2500Strobe::SIDLE);
+        send_cc2500_strobe(Cc2500Strobe::SFRX);
+        enter_cc2500_receive_mode();
     }
 
     void DomusLine::initialize_cc2500()
@@ -265,6 +435,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
             send_cc2500_strobe(Cc2500Strobe::STX);
             delay(3);
         }
+        enter_cc2500_receive_mode();
     }
 
     void DomusLine::send_domusline_command(DomusLineCommand command, uint8_t argument)
@@ -291,45 +462,38 @@ DomusLine::DomusLine() : PollingComponent(200) {}
             send_cc2500_strobe(Cc2500Strobe::STX);
             delay(repeat_delay_ms);
         }
+        enter_cc2500_receive_mode();
     }
 
     void DomusLine::turn_light_on(uint8_t currentTemperature)
     {
         send_domusline_command_repeatedly(DomusLineCommand::LIGHT_ON, currentTemperature, 6, 35);
-        enter_cc2500_power_down();
     }
 
     void DomusLine::turn_light_off()
     {
         send_domusline_command_repeatedly(DomusLineCommand::LIGHT_OFF, 0, 6, 35);
-        enter_cc2500_power_down();
     }
 
     void DomusLine::increase_light_brightness()
     {
         send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_UP, 0, 6, 2);
-        send_cc2500_strobe(Cc2500Strobe::SPWD);
     }
 
     void DomusLine::decrease_light_brightness()
     {
         send_domusline_command_repeatedly(DomusLineCommand::BRIGHTNESS_DOWN, 0, 5, 2);
-        enter_cc2500_power_down();
     }
 
     void DomusLine::set_light_color_temperature(uint8_t currentTemperature)
     {
         send_domusline_command_repeatedly(DomusLineCommand::SET_COLOR_TEMPERATURE, currentTemperature, 5, 2);
-        enter_cc2500_power_down();
     }
 
-    void DomusLine::enter_cc2500_power_down()
+    void DomusLine::enter_cc2500_receive_mode()
     {
-        for (uint8_t attempt = 0; attempt < 5; attempt++)
-        {
-            send_cc2500_strobe(Cc2500Strobe::SPWD);
-            delay(67);
-        }
+        send_cc2500_strobe(Cc2500Strobe::SIDLE);
+        send_cc2500_strobe(Cc2500Strobe::SRX);
     }
 
     uint8_t DomusLine::calculate_domusline_xor_checksum(const uint8_t *data, std::size_t length)

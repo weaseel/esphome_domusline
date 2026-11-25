@@ -17,6 +17,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void set_ready_pin(uint8_t pin);
 
   void setup() override;
+  void loop() override;
   void update() override;
   light::LightTraits get_traits() override;
   void setup_state(light::LightState *state) override;
@@ -30,7 +31,12 @@ class DomusLine : public PollingComponent, public light::LightOutput {
     STX = 0x35,
     SIDLE = 0x36,
     SPWD = 0x39,
+    SFRX = 0x3A,
     SFTX = 0x3B,
+  };
+
+  enum class Cc2500StatusRegister : uint8_t {
+    RXBYTES = 0x3B,
   };
 
   enum class Cc2500Register : uint8_t {
@@ -96,7 +102,13 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void send_cc2500_strobe(Cc2500Strobe strobe);
   void write_cc2500_register(Cc2500Register reg, uint8_t value);
   uint8_t read_cc2500_register(Cc2500Register reg);
+  uint8_t read_cc2500_status_register(Cc2500StatusRegister reg);
+  void read_cc2500_rx_fifo(uint8_t *data, uint8_t length);
   void write_cc2500_burst(Cc2500Register address, const uint8_t *data, uint8_t length);
+  void poll_cc2500_rx_fifo();
+  void process_received_packet(const uint8_t *packet, uint8_t length, bool crc_valid);
+  void synchronize_remote_command(DomusLineCommand command, uint8_t argument);
+  void flush_cc2500_rx_fifo();
   void initialize_cc2500();
   void send_domusline_command(DomusLineCommand command, uint8_t argument);
   void send_domusline_command_repeatedly(DomusLineCommand command, uint8_t argument, uint8_t repeat_count,
@@ -106,7 +118,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void increase_light_brightness();
   void decrease_light_brightness();
   void set_light_color_temperature(uint8_t current_temperature);
-  void enter_cc2500_power_down();
+  void enter_cc2500_receive_mode();
   uint8_t calculate_domusline_xor_checksum(const uint8_t *data, std::size_t length);
 
   uint8_t CS = 5;
@@ -116,6 +128,9 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   uint8_t lastTemperature = 0;
   bool lightIsOn = false;
   bool writeCallbackIsRunning = false;
+  uint32_t last_receive_poll_ms = 0;
+  uint8_t pending_rx_packet_length = 0;
+  light::LightState *light_state_{nullptr};
 };
 
 }
