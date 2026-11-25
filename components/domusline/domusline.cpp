@@ -14,6 +14,20 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     void DomusLine::set_cs_pin(uint8_t pin) { CS = pin; }
     void DomusLine::set_ready_pin(uint8_t pin) { readyPin = pin; }
 
+    void DomusLine::send_test_command(int opcode, int argument, int repetitions)
+    {
+        if (opcode < 0 || opcode > 255 || argument < 0 || argument > 255 || repetitions < 1 || repetitions > 6)
+        {
+            ESP_LOGW("domusline", "Test command rejected: opcode/argument must be 0..255 and repetitions 1..6");
+            return;
+        }
+
+        ESP_LOGW("domusline", "Sending test command opcode=0x%02X argument=0x%02X repetitions=%d",
+                 opcode, argument, repetitions);
+        send_domusline_command_raw_repeatedly(static_cast<uint8_t>(opcode), static_cast<uint8_t>(argument),
+                                              static_cast<uint8_t>(repetitions), 2);
+    }
+
     void DomusLine::setup() 
     {        
 
@@ -440,25 +454,36 @@ DomusLine::DomusLine() : PollingComponent(200) {}
 
     void DomusLine::send_domusline_command(DomusLineCommand command, uint8_t argument)
     {
-        const uint8_t payload[] = {0x05, 0x7A, 0xEF, static_cast<uint8_t>(command), argument,
+        send_domusline_command_raw(static_cast<uint8_t>(command), argument);
+    }
+
+    void DomusLine::send_domusline_command_raw(uint8_t opcode, uint8_t argument)
+    {
+        const uint8_t payload[] = {0x05, 0x7A, 0xEF, opcode, argument,
                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        uint8_t fifo_packet[] = {0x0E, 0x68, 0x05, 0x7A, 0xEF, static_cast<uint8_t>(command), argument,
+        uint8_t fifo_packet[] = {0x0E, 0x68, 0x05, 0x7A, 0xEF, opcode, argument,
                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0xFF};
         fifo_packet[13] = calculate_domusline_xor_checksum(payload, sizeof(payload));
 
         ESP_LOGD("domusline", "Queue Domus Line command 0x%02X, argument 0x%02X",
-                 static_cast<uint8_t>(command), argument);
+                 opcode, argument);
         write_cc2500_burst(Cc2500Register::TX_FIFO, fifo_packet, sizeof(fifo_packet));
     }
 
     void DomusLine::send_domusline_command_repeatedly(DomusLineCommand command, uint8_t argument,
                                                       uint8_t repeat_count, uint16_t repeat_delay_ms)
     {
+        send_domusline_command_raw_repeatedly(static_cast<uint8_t>(command), argument, repeat_count, repeat_delay_ms);
+    }
+
+    void DomusLine::send_domusline_command_raw_repeatedly(uint8_t opcode, uint8_t argument,
+                                                         uint8_t repeat_count, uint16_t repeat_delay_ms)
+    {
         for (uint8_t attempt = 0; attempt < repeat_count; attempt++)
         {
             send_cc2500_strobe(Cc2500Strobe::SIDLE);
             send_cc2500_strobe(Cc2500Strobe::SFTX);
-            send_domusline_command(command, argument);
+            send_domusline_command_raw(opcode, argument);
             send_cc2500_strobe(Cc2500Strobe::STX);
             delay(repeat_delay_ms);
         }

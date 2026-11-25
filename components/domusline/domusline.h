@@ -15,6 +15,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
 
   void set_cs_pin(uint8_t pin);
   void set_ready_pin(uint8_t pin);
+  void send_test_command(int opcode, int argument, int repetitions);
 
   void setup() override;
   void loop() override;
@@ -111,8 +112,11 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void flush_cc2500_rx_fifo();
   void initialize_cc2500();
   void send_domusline_command(DomusLineCommand command, uint8_t argument);
+  void send_domusline_command_raw(uint8_t opcode, uint8_t argument);
   void send_domusline_command_repeatedly(DomusLineCommand command, uint8_t argument, uint8_t repeat_count,
                                          uint16_t repeat_delay_ms);
+  void send_domusline_command_raw_repeatedly(uint8_t opcode, uint8_t argument, uint8_t repeat_count,
+                                             uint16_t repeat_delay_ms);
   void turn_light_on(uint8_t current_temperature);
   void turn_light_off();
   void increase_light_brightness();

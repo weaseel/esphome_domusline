@@ -16,6 +16,18 @@ logger:
 
 light:
   - platform: domusline
+    output_id: domusline_radio
     name: "Domus Line"
     cs_pin: 5
     ready_pin: 19
+
+api:
+  actions:
+    - action: test_domusline_command
+      description: Send a raw Domus Line opcode for protocol testing
+      variables:
+        opcode: int
+        argument: int
+        repetitions: int
+      then:
+        - lambda: id(domusline_radio).send_test_command(opcode, argument, repetitions);

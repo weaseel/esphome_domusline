@@ -62,6 +62,22 @@ The operation values and their apparent meanings, based on how this component ca
 
 These operation codes and the XOR checksum belong to the Domus Line protocol, not the CC2500. Their meanings are inferred from the existing call sites; the CC2500 itself only handles the SPI strobes, FIFO, and radio transmission. Commands are repeated by the component to match the original behavior.
 
+### Testing candidate opcodes from Home Assistant
+
+The example exposes an `api.actions` action named `test_domusline_command`. After flashing the example, call `esphome.domus_line_example_test_domusline_command` from Home Assistant's Developer Tools or an automation with integer fields `opcode`, `argument`, and `repetitions`. The component sends the candidate using the normal Domus Line frame and checksum, then returns to receive mode. Values are limited to 0-255, and repetitions to 1-6.
+
+For example, to test opcode `0x50` with argument `0x80` once:
+
+```yaml
+action: esphome.domus_line_example_test_domusline_command
+data:
+  opcode: 80
+  argument: 128
+  repetitions: 1
+```
+
+To look for an absolute-brightness command, first use the remote to set several known levels and compare the received opcode/argument logs. If the remote only emits `0x11`/`0x21` with no level argument, those are relative step commands. Then test candidate opcodes and arguments at low repetition counts, changing one value at a time and recording the resulting lamp level. A command that consistently produces the requested level from different starting levels is evidence of an absolute set command. Test only while you can observe the lamp; unknown opcodes may have undocumented effects.
+
 ## Receiving remote commands
 
 After initialization and after each transmitted command, the CC2500 returns to receive mode. The component polls the RX FIFO every 5 ms, waits for the variable-length packet and the two appended CC2500 status bytes, then checks the radio CRC, Domus Line prefix/trailer, and XOR checksum. Valid frames are logged at INFO level, for example:
