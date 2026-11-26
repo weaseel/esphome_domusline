@@ -1,7 +1,11 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/core/hal.h"
 #include "esphome/components/light/light_output.h"
+#include "esphome/components/spi/spi.h"
+
+#include "freertos/FreeRTOS.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -9,13 +13,15 @@
 namespace esphome {
 namespace domusline {
 
-class DomusLine : public PollingComponent, public light::LightOutput {
+class DomusLine : public PollingComponent,
+                  public light::LightOutput,
+                  public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_LOW,
+                                        spi::CLOCK_PHASE_LEADING, spi::DATA_RATE_1MHZ> {
  public:
   DomusLine();
 
-  void set_cs_pin(uint8_t pin);
-  void set_ready_pin(uint8_t pin);
-  void set_gdo0_pin(uint8_t pin);
+  void set_ready_pin(GPIOPin *pin);
+  void set_gdo0_pin(GPIOPin *pin);
   void send_test_command(int opcode, int argument, int repetitions);
 
   void setup() override;
@@ -26,7 +32,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void write_state(light::LightState *state) override;
 
  private:
-  static void gdo0_interrupt(void *arg);
+  static void IRAM_ATTR gdo0_interrupt(DomusLine *arg);
   uint8_t gdo0_signal_config() const;
 
   enum class Cc2500Strobe : uint8_t {
@@ -129,9 +135,8 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   void enter_cc2500_receive_mode();
   uint8_t calculate_domusline_xor_checksum(const uint8_t *data, std::size_t length);
 
-  uint8_t CS = 5;
-  uint8_t readyPin = 19;
-  int gdo0_pin_ = -1;
+  GPIOPin *ready_pin_{nullptr};
+  GPIOPin *gdo0_pin_{nullptr};
   uint8_t actualBrightness = 10;
   uint8_t setBrightness = 10;
   uint8_t lastTemperature = 0;
@@ -140,6 +145,7 @@ class DomusLine : public PollingComponent, public light::LightOutput {
   uint32_t last_receive_poll_ms = 0;
   uint8_t pending_rx_packet_length = 0;
   volatile bool receive_interrupt_pending_ = false;
+  portMUX_TYPE receive_mux_ = portMUX_INITIALIZER_UNLOCKED;
   light::LightState *light_state_{nullptr};
 };
 

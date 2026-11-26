@@ -1,9 +1,6 @@
-#include <Arduino.h>
 #include "domusline.h"
-#include <SPI.h>
 
 
-constexpr uint32_t SPI_CLK = 250000;
 constexpr uint8_t CC2500_MAX_RX_PACKET_LENGTH = 61;
 constexpr uint8_t DOMUSLINE_RF_PAYLOAD_LENGTH = 14;
 constexpr uint8_t CC2500_GDO0_SYNC_WORD = 0x06;
@@ -26,19 +23,19 @@ constexpr uint16_t DOMUSLINE_COLOR_TEMPERATURE_REPEAT_DELAY_MS = 2;
 
 DomusLine::DomusLine() : PollingComponent(200) {}
 
-    void DomusLine::set_cs_pin(uint8_t pin) { CS = pin; }
-    void DomusLine::set_ready_pin(uint8_t pin) { readyPin = pin; }
-    void DomusLine::set_gdo0_pin(uint8_t pin) { gdo0_pin_ = pin; }
+    void DomusLine::set_ready_pin(GPIOPin *pin) { ready_pin_ = pin; }
+    void DomusLine::set_gdo0_pin(GPIOPin *pin) { gdo0_pin_ = pin; }
 
-    void IRAM_ATTR DomusLine::gdo0_interrupt(void *arg)
+    void IRAM_ATTR DomusLine::gdo0_interrupt(DomusLine *arg)
     {
-        auto *component = static_cast<DomusLine *>(arg);
-        component->receive_interrupt_pending_ = true;
+        portENTER_CRITICAL_ISR(&arg->receive_mux_);
+        arg->receive_interrupt_pending_ = true;
+        portEXIT_CRITICAL_ISR(&arg->receive_mux_);
     }
 
     uint8_t DomusLine::gdo0_signal_config() const
     {
-        return gdo0_pin_ >= 0 ? CC2500_GDO0_PACKET_CRC_OK : CC2500_GDO0_SYNC_WORD;
+        return gdo0_pin_ != nullptr ? CC2500_GDO0_PACKET_CRC_OK : CC2500_GDO0_SYNC_WORD;
     }
 
     void DomusLine::send_test_command(int opcode, int argument, int repetitions)
@@ -57,24 +54,24 @@ DomusLine::DomusLine() : PollingComponent(200) {}
 
     void DomusLine::setup() 
     {        
-
-        SPI.begin();
-        pinMode(CS, OUTPUT);
-        digitalWrite(CS, HIGH);
+        this->spi_setup();
+        this->ready_pin_->setup();
         delay(10);
-        digitalWrite(CS, LOW);
-        SPI.beginTransaction(SPISettings(SPI_CLK, MSBFIRST, SPI_MODE0));
-
+        this->enable();
         delay(500);
-        digitalWrite(CS, HIGH);
+        this->disable();
         
         ESP_LOGD("domusline", "Initializing CC2500");
         initialize_cc2500();
-        if (gdo0_pin_ >= 0)
+        if (gdo0_pin_ != nullptr)
         {
-            pinMode(gdo0_pin_, INPUT);
-            attachInterruptArg(gdo0_pin_, &DomusLine::gdo0_interrupt, this, RISING);
-            receive_interrupt_pending_ = digitalRead(gdo0_pin_) == HIGH;
+            this->gdo0_pin_->setup();
+            if (this->gdo0_pin_->is_internal())
+            {
+                static_cast<InternalGPIOPin *>(this->gdo0_pin_)
+                    ->attach_interrupt(&DomusLine::gdo0_interrupt, this, gpio::INTERRUPT_RISING_EDGE);
+                receive_interrupt_pending_ = this->gdo0_pin_->digital_read();
+            }
         }
     }
 
@@ -102,12 +99,12 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     void DomusLine::loop()
     {
         const uint32_t now = millis();
-        noInterrupts();
+        portENTER_CRITICAL(&receive_mux_);
         const bool interrupt_pending = receive_interrupt_pending_;
         receive_interrupt_pending_ = false;
-        interrupts();
+        portEXIT_CRITICAL(&receive_mux_);
 
-        const uint32_t poll_interval_ms = gdo0_pin_ >= 0 ? 1000 : 5;
+        const uint32_t poll_interval_ms = gdo0_pin_ != nullptr ? 1000 : 5;
         if (!interrupt_pending && now - last_receive_poll_ms < poll_interval_ms)
             return;
 
@@ -193,20 +190,17 @@ DomusLine::DomusLine() : PollingComponent(200) {}
 
     void DomusLine::transfer_cc2500_bytes(const uint8_t *data, uint8_t length)
     {
-        digitalWrite(CS, LOW);
+        this->enable();
         delayMicroseconds(5);
-        while(digitalRead(readyPin) == true)  // Always wait for MISO to be low
+        while(this->ready_pin_->digital_read())  // Always wait for MISO to be low
         {
             delayMicroseconds(2);
         }
 
-        for(int i=0; i<length; i++)
-        {
-            SPI.transfer(data[i]);
-        }
+        this->write_array(data, length);
         delayMicroseconds(5);
         
-        digitalWrite(CS, HIGH);
+        this->disable();
         delayMicroseconds(40);
     }
     
@@ -224,49 +218,49 @@ DomusLine::DomusLine() : PollingComponent(200) {}
 
     uint8_t DomusLine::read_cc2500_register(Cc2500Register reg)
     {
-        digitalWrite(CS, LOW);
+        this->enable();
         delayMicroseconds(5);
-        while(digitalRead(readyPin) == HIGH)
+        while(this->ready_pin_->digital_read())
         {
             delayMicroseconds(2);
         }
 
-        SPI.transfer(static_cast<uint8_t>(reg) | 0x80);
-        const uint8_t value = SPI.transfer(0xFF);
+        this->transfer_byte(static_cast<uint8_t>(reg) | 0x80);
+        const uint8_t value = this->transfer_byte(0xFF);
         delayMicroseconds(5);
-        digitalWrite(CS, HIGH);
+        this->disable();
         delayMicroseconds(40);
         return value;
     }
 
     uint8_t DomusLine::read_cc2500_status_register(Cc2500StatusRegister reg)
     {
-        digitalWrite(CS, LOW);
+        this->enable();
         delayMicroseconds(5);
-        while (digitalRead(readyPin) == HIGH)
+        while (this->ready_pin_->digital_read())
             delayMicroseconds(2);
 
-        SPI.transfer(static_cast<uint8_t>(reg) | 0xC0);
-        const uint8_t value = SPI.transfer(0xFF);
+        this->transfer_byte(static_cast<uint8_t>(reg) | 0xC0);
+        const uint8_t value = this->transfer_byte(0xFF);
         delayMicroseconds(5);
-        digitalWrite(CS, HIGH);
+        this->disable();
         delayMicroseconds(40);
         return value;
     }
 
     void DomusLine::read_cc2500_rx_fifo(uint8_t *data, uint8_t length)
     {
-        digitalWrite(CS, LOW);
+        this->enable();
         delayMicroseconds(5);
-        while (digitalRead(readyPin) == HIGH)
+        while (this->ready_pin_->digital_read())
             delayMicroseconds(2);
 
-        SPI.transfer(static_cast<uint8_t>(Cc2500Register::TX_FIFO) | 0xC0);
+        this->transfer_byte(static_cast<uint8_t>(Cc2500Register::TX_FIFO) | 0xC0);
         for (uint8_t i = 0; i < length; i++)
-            data[i] = SPI.transfer(0xFF);
+            data[i] = this->transfer_byte(0xFF);
 
         delayMicroseconds(5);
-        digitalWrite(CS, HIGH);
+        this->disable();
         delayMicroseconds(40);
     }
 
@@ -416,9 +410,9 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     void DomusLine::initialize_cc2500()
     {
         send_cc2500_strobe(Cc2500Strobe::SIDLE);
-        digitalWrite(CS, LOW);
+        this->enable();
         delayMicroseconds(10);
-        digitalWrite(CS, HIGH);
+        this->disable();
         delayMicroseconds(300);
 
         send_cc2500_strobe(Cc2500Strobe::SRES);

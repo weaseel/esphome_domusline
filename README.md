@@ -14,6 +14,12 @@ external_components:
       ref: main
     components: [domusline]
 
+spi:
+  # Example pins for a classic ESP32 DevKit; choose pins supported by your board.
+  clk_pin: 18
+  mosi_pin: 23
+  miso_pin: 19
+
 light:
   - platform: domusline
     name: "Domus Line"
@@ -23,11 +29,11 @@ light:
     gdo0_pin: 4
 ```
 
-The component defaults to `cs_pin: 5` and `ready_pin: 19`, matching the original implementation. `ready_pin` is the CC2500 MISO/ready signal used while sending packets. `gdo0_pin` is optional: when configured, the CC2500 signals a CRC-valid received packet on GDO0 and the ESP32 handles it by interrupt; without it, the component polls the receive FIFO every 5 ms.
+The component defaults to `cs_pin: 5` and `ready_pin: 19`, matching the original implementation. `ready_pin` must be connected to the same signal as the SPI bus `miso_pin`; it is used as the CC2500 ready signal while sending packets. `gdo0_pin` is optional: when configured, the CC2500 signals a CRC-valid received packet on GDO0 and the ESP32 handles it by interrupt; without it, the component polls the receive FIFO every 5 ms.
 
 ### Wiring
 
-Use the ESP32 board's Arduino hardware-SPI pins; their numbers depend on the selected board. For a common ESP32 DevKit using the default VSPI pins, wire:
+Use the SPI pins configured in the ESPHome `spi:` block; their numbers depend on the selected board. For a common ESP32 DevKit, wire:
 
 | CC2500 pin | ESP32 DevKit pin | Purpose |
 | --- | --- | --- |
@@ -39,9 +45,9 @@ Use the ESP32 board's Arduino hardware-SPI pins; their numbers depend on the sel
 | CSn | GPIO5 | Chip select (`cs_pin`). |
 | GDO0 | GPIO4 | Optional receive interrupt (`gdo0_pin`). Leave unconnected when using polling. |
 
-If your board uses different hardware-SPI pins, wire SCLK/MOSI/MISO to that board's defaults and configure `cs_pin`, `ready_pin`, and `gdo0_pin` to match. The ESP32 and CC2500 must share ground and use 3.3 V logic.
+If your board uses different SPI pins, configure `clk_pin`, `mosi_pin`, and `miso_pin` for those pins, and set `ready_pin` to the same GPIO as `miso_pin`. Configure `cs_pin` and `gdo0_pin` to match your wiring. ESP32-C6 requires the ESP-IDF framework; this component uses ESPHome's SPI and GPIO interfaces and works with ESP-IDF. The ESP32 and CC2500 must share ground and use 3.3 V logic.
 
-Use an ESP32 board with the Arduino framework and ensure the pin numbers match your wiring. The light supports on/off, brightness, and tunable white from 175 to 333 mireds.
+Use an ESP32 board and ensure the SPI and GPIO pin numbers match your wiring. ESP32-C6 requires the ESP-IDF framework. The light supports on/off, brightness, and tunable white from 175 to 333 mireds.
 
 ## CC2500 data format
 
