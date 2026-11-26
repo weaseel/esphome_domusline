@@ -20,7 +20,7 @@ class DomusLine : public PollingComponent,
  public:
   DomusLine();
 
-  void set_ready_pin(GPIOPin *pin);
+  void set_ready_pin(uint8_t pin);
   void set_gdo0_pin(GPIOPin *pin);
   void send_test_command(int opcode, int argument, int repetitions);
 
@@ -135,7 +135,7 @@ class DomusLine : public PollingComponent,
   void enter_cc2500_receive_mode();
   uint8_t calculate_domusline_xor_checksum(const uint8_t *data, std::size_t length);
 
-  GPIOPin *ready_pin_{nullptr};
+  uint8_t ready_pin_{19};
   GPIOPin *gdo0_pin_{nullptr};
   uint8_t actualBrightness = 10;
   uint8_t setBrightness = 10;

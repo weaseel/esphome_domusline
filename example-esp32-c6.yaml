@@ -24,7 +24,6 @@ light:
     output_id: domusline_radio
     name: "Domus Line"
     cs_pin: 0
-    ready_pin: 3
     gdo0_pin: 2
 
 api:

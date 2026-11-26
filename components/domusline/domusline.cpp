@@ -1,4 +1,5 @@
 #include "domusline.h"
+#include "driver/gpio.h"
 
 
 constexpr uint8_t CC2500_MAX_RX_PACKET_LENGTH = 61;
@@ -23,7 +24,7 @@ constexpr uint16_t DOMUSLINE_COLOR_TEMPERATURE_REPEAT_DELAY_MS = 2;
 
 DomusLine::DomusLine() : PollingComponent(200) {}
 
-    void DomusLine::set_ready_pin(GPIOPin *pin) { ready_pin_ = pin; }
+    void DomusLine::set_ready_pin(uint8_t pin) { ready_pin_ = pin; }
     void DomusLine::set_gdo0_pin(GPIOPin *pin) { gdo0_pin_ = pin; }
 
     void IRAM_ATTR DomusLine::gdo0_interrupt(DomusLine *arg)
@@ -55,7 +56,6 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     void DomusLine::setup() 
     {        
         this->spi_setup();
-        this->ready_pin_->setup();
         delay(10);
         this->enable();
         delay(500);
@@ -192,7 +192,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     {
         this->enable();
         delayMicroseconds(5);
-        while(this->ready_pin_->digital_read())  // Always wait for MISO to be low
+        while (gpio_get_level(static_cast<gpio_num_t>(this->ready_pin_)) != 0)  // Wait for MISO to be low
         {
             delayMicroseconds(2);
         }
@@ -220,7 +220,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     {
         this->enable();
         delayMicroseconds(5);
-        while(this->ready_pin_->digital_read())
+        while (gpio_get_level(static_cast<gpio_num_t>(this->ready_pin_)) != 0)
         {
             delayMicroseconds(2);
         }
@@ -237,7 +237,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     {
         this->enable();
         delayMicroseconds(5);
-        while (this->ready_pin_->digital_read())
+        while (gpio_get_level(static_cast<gpio_num_t>(this->ready_pin_)) != 0)
             delayMicroseconds(2);
 
         this->transfer_byte(static_cast<uint8_t>(reg) | 0xC0);
@@ -252,7 +252,7 @@ DomusLine::DomusLine() : PollingComponent(200) {}
     {
         this->enable();
         delayMicroseconds(5);
-        while (this->ready_pin_->digital_read())
+        while (gpio_get_level(static_cast<gpio_num_t>(this->ready_pin_)) != 0)
             delayMicroseconds(2);
 
         this->transfer_byte(static_cast<uint8_t>(Cc2500Register::TX_FIFO) | 0xC0);

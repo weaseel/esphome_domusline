@@ -24,12 +24,11 @@ light:
   - platform: domusline
     name: "Domus Line"
     cs_pin: 5
-    ready_pin: 19
     # Optional: connect CC2500 GDO0 to ESP32 GPIO4 for interrupt-driven RX
     gdo0_pin: 4
 ```
 
-The component defaults to `cs_pin: 5` and `ready_pin: 19`, matching the original implementation. `ready_pin` must be connected to the same signal as the SPI bus `miso_pin`; it is used as the CC2500 ready signal while sending packets. `gdo0_pin` is optional: when configured, the CC2500 signals a CRC-valid received packet on GDO0 and the ESP32 handles it by interrupt; without it, the component polls the receive FIFO every 5 ms.
+The component defaults to `cs_pin: 5`, matching the original implementation. It automatically uses the SPI bus `miso_pin` as the CC2500 ready signal, so no separate `ready_pin` setting is needed. Existing configurations may keep `ready_pin`, but it must match `miso_pin`. `gdo0_pin` is optional: when configured, the CC2500 signals a CRC-valid received packet on GDO0 and the ESP32 handles it by interrupt; without it, the component polls the receive FIFO every 5 ms.
 
 ### Wiring
 
@@ -45,13 +44,13 @@ Use the SPI pins configured in the ESPHome `spi:` block; their numbers depend on
 | CSn | GPIO5 | Chip select (`cs_pin`). |
 | GDO0 | GPIO4 | Optional receive interrupt (`gdo0_pin`). Leave unconnected when using polling. |
 
-If your board uses different SPI pins, configure `clk_pin`, `mosi_pin`, and `miso_pin` for those pins, and set `ready_pin` to the same GPIO as `miso_pin`. Configure `cs_pin` and `gdo0_pin` to match your wiring. ESP32-C6 requires the ESP-IDF framework; this component uses ESPHome's SPI and GPIO interfaces and works with ESP-IDF. The ESP32 and CC2500 must share ground and use 3.3 V logic.
+If your board uses different SPI pins, configure `clk_pin`, `mosi_pin`, and `miso_pin` for those pins. The component automatically uses the configured MISO GPIO as the ready signal. Configure `cs_pin` and `gdo0_pin` to match your wiring. ESP32-C6 requires the ESP-IDF framework; this component uses ESPHome's SPI and GPIO interfaces and works with ESP-IDF. The ESP32 and CC2500 must share ground and use 3.3 V logic.
 
 Use an ESP32 board and ensure the SPI and GPIO pin numbers match your wiring. ESP32-C6 requires the ESP-IDF framework. The light supports on/off, brightness, and tunable white from 175 to 333 mireds.
 
 ### ESP32-C6-DevKitC-1 example
 
-See [example-esp32-c6.yaml](./example-esp32-c6.yaml) for a complete ESP-IDF configuration. Its sample pin assignments are SCLK GPIO6, MOSI GPIO7, MISO/ready GPIO3, CSn GPIO0, and optional GDO0 GPIO2. The MISO and `ready_pin` entries intentionally use the same GPIO because the CC2500 uses its MISO line as the ready signal. Check your board revision and existing peripherals before using these pins.
+See [example-esp32-c6.yaml](./example-esp32-c6.yaml) for a complete ESP-IDF configuration. Its sample pin assignments are SCLK GPIO6, MOSI GPIO7, MISO/ready GPIO3, CSn GPIO0, and optional GDO0 GPIO2. The ready signal is automatically read from the MISO GPIO, so the pin is configured only once. Check your board revision and existing peripherals before using these pins.
 
 ## CC2500 data format
 
