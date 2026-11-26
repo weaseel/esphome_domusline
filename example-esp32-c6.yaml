@@ -1,0 +1,39 @@
+esphome:
+  name: domus-line-esp32-c6
+
+esp32:
+  board: esp32-c6-devkitc-1
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: ./
+    components: [domusline]
+
+logger:
+
+spi:
+  clk_pin: 6
+  mosi_pin: 7
+  miso_pin: 3
+
+light:
+  - platform: domusline
+    output_id: domusline_radio
+    name: "Domus Line"
+    cs_pin: 0
+    ready_pin: 3
+    gdo0_pin: 2
+
+api:
+  actions:
+    - action: test_domusline_command
+      description: Send a raw Domus Line opcode for protocol testing
+      variables:
+        opcode: int
+        argument: int
+        repetitions: int
+      then:
+        - lambda: id(domusline_radio).send_test_command(opcode, argument, repetitions);

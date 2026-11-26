@@ -49,6 +49,10 @@ If your board uses different SPI pins, configure `clk_pin`, `mosi_pin`, and `mis
 
 Use an ESP32 board and ensure the SPI and GPIO pin numbers match your wiring. ESP32-C6 requires the ESP-IDF framework. The light supports on/off, brightness, and tunable white from 175 to 333 mireds.
 
+### ESP32-C6-DevKitC-1 example
+
+See [example-esp32-c6.yaml](./example-esp32-c6.yaml) for a complete ESP-IDF configuration. Its sample pin assignments are SCLK GPIO6, MOSI GPIO7, MISO/ready GPIO3, CSn GPIO0, and optional GDO0 GPIO2. The MISO and `ready_pin` entries intentionally use the same GPIO because the CC2500 uses its MISO line as the ready signal. Check your board revision and existing peripherals before using these pins.
+
 ## CC2500 data format
 
 The component uses the CC2500 SPI interface to load each Domus Line command into the transmit FIFO, then issues the `STX` command strobe. The leading `0x7F` below is the CC2500 SPI burst-write header for its TX FIFO; it is not part of the FIFO contents or the Domus Line command:
